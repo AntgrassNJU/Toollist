@@ -1,0 +1,1117 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0e1116">
+<title>清单</title>
+<style>
+/* ==========================================================
+   §1  外观。想改配色，只改这一段里的变量就够了，
+      下面的规则全部引用它们，不必去翻 CSS 正文。
+   ========================================================== */
+:root{
+  --bg:        #0e1116;   /* 页面底色 */
+  --bg-card:   #161a21;   /* 卡片底色 */
+  --bg-input:  #12161c;   /* 输入框底色 */
+  --line:      #262c36;   /* 分隔线 */
+  --fg:        #e6e9ee;   /* 主文字 */
+  --fg-dim:    #98a2b3;   /* 次要文字 */
+  --accent:    #4f9cf9;   /* 主色（蓝） */
+  --ok:        #3ecf8e;   /* 完成（绿） */
+  --warn:      #f2b24b;   /* 将到期（琥珀） */
+  --danger:    #ff5f57;   /* 逾期/删除（红） */
+  --radius:    14px;
+  /* —— 留给你自己改：几天之内算"将到期" —— */
+  --soon-days: 3;
+}
+
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0}
+body{
+  background:var(--bg); color:var(--fg);
+  font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,sans-serif;
+  padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+.screen{max-width:680px;margin:0 auto;padding:18px 14px 64px}
+[hidden]{display:none !important}
+h1{font-size:19px;margin:0 0 2px;letter-spacing:.3px}
+h1 small{font-weight:400;color:var(--fg-dim);font-size:13px;margin-left:6px}
+.sub{color:var(--fg-dim);font-size:13px;margin:0 0 16px}
+.hint{color:var(--fg-dim);font-size:13px;margin-top:4px}
+
+/* ---------- 表单控件 ---------- */
+input,textarea,button,select{font:inherit;color:inherit}
+.inp{
+  width:100%;background:var(--bg-input);border:1px solid var(--line);
+  border-radius:10px;padding:10px 12px;outline:none;
+}
+.inp:focus{border-color:var(--accent)}
+.inp::placeholder{color:#5d6673}
+textarea.inp{resize:vertical;min-height:42px}
+.row{display:flex;gap:8px;margin-top:8px}
+.grid2{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.grid2 > .inp{flex:1 1 160px;width:auto}
+.due-row{display:flex;gap:8px;margin-top:8px}
+.due-row #addDue{flex:3 1 0}
+.due-row #addTime{flex:2 1 0}
+input[type=date],input[type=time]{min-width:0}
+
+/* ---------- DDL 选择器 ----------
+   思路：真正的 <input type=date> 藏起来（透明），铺满整个控件，当"点击探针"用；
+   上面盖一层自己排版的按钮。点哪儿都等于点那个输入框，系统日期选择器就弹出来。
+   这样既没有 yyyy/mm/dd 占位文字的丑陋，又不用自己写日历控件。
+
+   关键一步：按钮里的图标和文字必须设 pointer-events:none。
+   它们只是"样子"，如果不穿透，就会挡住下面那层透明输入框——
+   表现就是"只有文字旁边的空白能点开日历，点文字没反应"。 */
+.datepicker{position:relative;display:inline-flex;flex:1 1 auto;min-width:0;cursor:pointer}
+.datepicker .dpbtn{
+  display:flex;align-items:center;gap:6px;width:100%;
+  background:var(--bg-input);border:1px solid var(--line);border-radius:10px;
+  padding:10px 12px;cursor:pointer;color:var(--fg-dim);text-align:left;
+}
+.datepicker .dpbtn.set{color:var(--fg);border-color:#39424f}
+.datepicker .dpbtn .cal{
+  flex:none;display:inline-flex;align-items:center;justify-content:center;
+  width:16px;height:16px;color:#aab4c2;pointer-events:none;
+}
+.datepicker .dpbtn.set .cal{color:var(--accent)}
+/* 图标用 inline SVG 而不是 emoji：emoji 是彩色位图，在深色底上又暗又不统一，
+   而且各平台长得不一样。单色 SVG 用 currentColor 上色，跟着主题走。 */
+.dpbtn .cal svg{width:16px;height:16px;display:block;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round}
+.datepicker .dpbtn .txt{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;pointer-events:none}
+/* ✕ 是唯一需要真正接收点击的东西：它会设回 pointer-events:auto。
+   它在最上层，所以点它只清空日期，不会连带打开日历。 */
+.datepicker .dpbtn .clr{
+  flex:none;color:var(--fg-dim);font-size:15px;padding:0 2px;border-radius:6px;
+  position:relative;z-index:2;pointer-events:auto;
+}
+.datepicker .dpbtn .clr:hover{color:var(--danger);background:#2a1c1b}
+.datepicker input[type=date]{
+  position:absolute;left:0;top:0;width:100%;height:100%;
+  opacity:0;border:0;padding:0;margin:0;cursor:pointer;z-index:1;
+}
+.datepicker input[type=date]::-webkit-calendar-picker-indicator{opacity:0;cursor:pointer}
+.due-row input[type=time]{flex:2 1 0}
+
+.btn{
+  border:1px solid var(--line);background:var(--bg-card);border-radius:10px;
+  padding:9px 14px;cursor:pointer;white-space:nowrap;
+}
+.btn:hover{border-color:#39424f}
+.btn:active{transform:translateY(1px)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#0b1020;font-weight:600}
+.btn.tiny{padding:5px 9px;font-size:13px;border-radius:8px}
+.btn.danger{color:var(--danger);border-color:#3a2320}
+
+/* ---------- 顶部状态条 ---------- */
+.status{
+  display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--fg-dim);
+  border:1px solid var(--line);border-radius:10px;padding:7px 10px;margin-bottom:12px;
+  background:var(--bg-card);
+}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--fg-dim);flex:none}
+.dot.ok{background:var(--ok)}
+.dot.warn{background:var(--warn)}
+.dot.err{background:var(--danger)}
+#statusText{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ---------- 标签页 ---------- */
+.tabs{display:flex;gap:6px;border-bottom:1px solid var(--line);margin-bottom:14px}
+.tab{
+  flex:1;background:none;border:none;border-bottom:2px solid transparent;
+  padding:9px 4px;cursor:pointer;color:var(--fg-dim);font-size:14px;
+}
+.tab.active{color:var(--fg);border-bottom-color:var(--accent);font-weight:600}
+.tab .cnt{
+  display:inline-block;min-width:18px;padding:0 5px;margin-left:4px;
+  background:#232a34;border-radius:9px;font-size:11.5px;color:var(--fg-dim);font-weight:400;
+}
+
+/* ---------- 任务卡片 ---------- */
+.group{color:var(--fg-dim);font-size:12.5px;margin:20px 0 8px;letter-spacing:.5px}
+.list{display:flex;flex-direction:column;gap:8px}
+.card{
+  display:flex;gap:10px;align-items:flex-start;
+  background:var(--bg-card);border:1px solid var(--line);border-radius:var(--radius);
+  padding:11px 12px;
+}
+.card.done{opacity:.5}
+.card.done .title{text-decoration:line-through}
+.box{
+  width:22px;height:22px;flex:none;margin-top:1px;border-radius:7px;
+  border:1.5px solid #3c4653;background:transparent;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  font-size:13px;color:transparent;padding:0;
+}
+.box:hover{border-color:var(--accent)}
+.card.done .box{background:var(--ok);border-color:var(--ok);color:#0b1020}
+.main{flex:1;min-width:0}
+.title{word-break:break-word;white-space:pre-wrap}
+.note{color:var(--fg-dim);font-size:13px;margin-top:3px;white-space:pre-wrap;word-break:break-word}
+/* 长备注折叠：默认只显示 3 行。-webkit-line-clamp 在 Chrome / Edge / 新版 Firefox 都支持；
+   万一浏览器不支持，这段规则会被整条忽略，备注就完整显示（不会丢内容）。 */
+.note.clamp{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}
+.note-more{
+  background:none;border:none;padding:2px 0 0;margin:0;cursor:pointer;
+  color:var(--accent);font-size:12.5px;
+}
+.note-more:hover{text-decoration:underline}
+
+/* 原生时间框：没填值时显示的 "--:--" 用的是浏览器默认的暗色，
+   在深底上几乎看不见。这里把它连同小图标一起提亮。 */
+input[type=time]{color:var(--fg)}
+input[type=time]::-webkit-calendar-picker-indicator{
+  opacity:.55;filter:invert(1) brightness(1.5);cursor:pointer;
+}
+input[type=time]::-webkit-calendar-picker-indicator:hover{opacity:.9}
+.meta{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:7px}
+
+.chip{
+  display:inline-flex;align-items:center;gap:4px;font-size:12px;
+  border-radius:999px;padding:2px 9px;background:#222a35;color:var(--fg-dim);border:1px solid var(--line);
+}
+.chip.soon{color:var(--warn);border-color:#4a3a18;background:#2a2113}
+.chip.over{color:var(--danger);border-color:#4a2320;background:#2c1715;font-weight:600}
+.chip.none{opacity:.65}
+.chip.pin{color:var(--accent);border-color:#22364f;background:#14212f}
+
+.acts{margin-left:auto;display:flex;gap:6px;opacity:.75}
+.card:hover .acts{opacity:1}
+
+.empty{color:var(--fg-dim);text-align:center;padding:34px 10px;font-size:13.5px}
+.bar{display:flex;justify-content:flex-end;margin-top:12px}
+
+.toast{
+  position:fixed;left:50%;bottom:24px;transform:translateX(-50%);
+  background:#242b36;border:1px solid var(--line);color:var(--fg);
+  padding:9px 16px;border-radius:999px;font-size:13.5px;z-index:99;
+  box-shadow:0 8px 24px rgba(0,0,0,.45);max-width:88vw;
+}
+.foot{margin-top:28px;color:var(--fg-dim);font-size:12px;line-height:1.8}
+kbd{background:#222a35;border:1px solid var(--line);border-radius:5px;padding:1px 5px;font-size:11.5px}
+</style>
+</head>
+<body>
+
+<!-- ============================================================
+     §2  登录界面：只有在浏览器里还没存过会话时才出现
+     ============================================================ -->
+<div id="authScreen" class="screen" hidden>
+  <h1>清单<small>第一论域</small></h1>
+  <p class="sub">首次使用：填一次你为这个工具建的 Supabase 账号，之后浏览器会记住。</p>
+
+  <div class="grid2">
+    <input id="authEmail" class="inp" type="email" placeholder="邮箱" autocomplete="username">
+    <input id="authPass"  class="inp" type="password" placeholder="密码" autocomplete="current-password">
+  </div>
+  <div class="row">
+    <button id="btnSignIn" class="btn primary" style="flex:1">登录并同步</button>
+  </div>
+  <div id="authMsg" class="hint"></div>
+  <p class="foot">
+    密码不会离开这台设备，只用于向 Supabase 换取访问令牌，令牌存在浏览器本地。<br>
+    所以请把这个页面放在 <b>https</b> 地址上使用，不要在公共电脑上登录。
+  </p>
+</div>
+
+<!-- ============================================================
+     §3  主界面
+     ============================================================ -->
+<div id="appScreen" class="screen" hidden>
+  <h1>清单<small id="todayLabel"></small></h1>
+
+  <div class="status">
+    <span id="statusDot" class="dot"></span>
+    <span id="statusText">正在连接…</span>
+    <button id="btnSync" class="btn tiny">立即同步</button>
+    <button id="btnSignOut" class="btn tiny">退出</button>
+  </div>
+
+  <div class="tabs" id="tabs"></div>
+
+  <!-- 新增表单：当前在哪个标签页，就添加哪一类 -->
+  <form id="addForm" autocomplete="off">
+    <input id="addTitle" class="inp" placeholder="做点什么…（回车添加）" maxlength="300">
+    <div class="grid2" style="margin-top:8px">
+      <textarea id="addNote" class="inp" rows="2" placeholder="备注（可留空）" maxlength="2000"></textarea>
+    </div>
+    <div id="dueWrap" class="due-row">
+      <div class="datepicker">
+        <button id="dueBtn" class="dpbtn" type="button">
+          <span class="cal"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 11h18"/></svg></span>
+          <span class="txt"><span class="ph">设置 DDL</span><span class="val" hidden></span></span>
+          <span class="clr" id="dueClear" title="清除 DDL" hidden>✕</span>
+        </button>
+        <input id="addDue" type="date" tabindex="-1" aria-label="选择截止日期">
+      </div>
+      <input id="addTime" class="inp" type="time" title="截止时间（可留空，按 23:59 算）">
+    </div>
+    <div class="hint" id="dueHint">DDL 只对 A 类（待办作业）有意义；不设置就是"无期限"。时间留空按当天 23:59 算。</div>
+    <div class="bar"><button class="btn primary" type="submit">添加</button></div>
+  </form>
+
+  <div id="listWrap"></div>
+</div>
+
+<!-- ============================================================
+     §4  逻辑
+     ============================================================ -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+"use strict";
+
+/* ============================================================
+   ★ 唯一需要你动手的地方 ★
+   ------------------------------------------------------------
+   把下面两个值换成你自己 Supabase 项目里的（见 README 第 2 步）：
+     SUPABASE_URL      形如 https://abcdefgh.supabase.co
+     SUPABASE_ANON_KEY anon public key，以 eyJ 开头的长字符串
+
+   注意：anon key 是"公开密钥"，本来就要写在网页里，泄露它不等于泄露数据
+   —— 数据由数据库的 RLS 策略守着（见 supabase.sql）。
+   但你的登录密码/访问令牌绝不能写在这里。
+   ============================================================ */
+const SUPABASE_URL      = "https://hljgnqtudzslbbtditrc.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhsamducXR1ZHpzbGJidGRpdHJjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk2NjkwNjMsImV4cCI6MjEwNTI0NTA2M30.GYKxGqwY4HgQ58_B7cb4FTS_PLnydK0ZQkAjtU-mXnc";
+
+/* ------------------------------------------------------------
+   §4.1  可以放心改的常量
+   ------------------------------------------------------------ */
+
+// 固定时区：所有"日期 / 星期几 / 倒计时"都按 UTC+8 计算，
+// 不跟随设备时区。这样手机出国、电脑时区设错，显示都不会跳。
+const TZ_OFFSET_HOURS = 8;
+
+// 数据库表名，与 supabase.sql 里保持一致
+const TABLE = "tasks";
+
+// 备注超过多少个字就折叠（大约 3 行）。嫌太早/太晚折叠就改这个数。
+const NOTE_CLAMP_CHARS = 60;
+
+// localStorage 里用的键名
+const K_CACHE = "qs.cache";       // 待办数据的本地缓存
+const K_DEL = "qs.deleted";       // 已在本地删除、但还没通知服务器的 id（墓碑）
+const K_OFFLINE = "qs.offline";   // 离线模式开关（默认 false）
+
+/* ------------------------------------------------------------
+   §4.2  小工具
+   ------------------------------------------------------------ */
+
+const $ = (id) => document.getElementById(id);
+
+const uuid = () =>
+  (crypto.randomUUID ? crypto.randomUUID()
+                     : "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, c => {
+                         const r = Math.random() * 16 | 0;
+                         return (c === "x" ? r : (r & 0x3 | 0x8)).toString(16);
+                       }));
+
+const esc = (s) => String(s).replace(/[&<>"']/g,
+  (c) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
+
+function sha256Hex(text){
+  const bytes = new TextEncoder().encode(text);
+  return crypto.subtle.digest("SHA-256", bytes).then((buf) =>
+    Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join(""));
+}
+
+// 把"某一时刻"换算到固定时区的日历字段（年/月/日/时/分/星期）
+function tzParts(iso){
+  const t = (typeof iso === "number" ? iso : Date.parse(iso)) + TZ_OFFSET_HOURS * 3600e3;
+  const d = new Date(t);
+  return {
+    y: d.getUTCFullYear(), m: d.getUTCMonth() + 1, d: d.getUTCDate(),
+    hh: d.getUTCHours(), mm: d.getUTCMinutes(), dow: d.getUTCDay(),
+  };
+}
+
+const DOW = ["日", "一", "二", "三", "四", "五", "六"];   // 索引 = (dow+1)%7 时从周一开始
+const pad2 = (n) => String(n).padStart(2, "0");
+
+// "10-25(周六) 23:59" —— 当天正好 23:59 就省略时间，日期输入框默认就是这天
+function fmtDue(iso){
+  const p = tzParts(iso);
+  const hhmm = (p.hh === 23 && p.mm === 59) ? "" : " " + pad2(p.hh) + ":" + pad2(p.mm);
+  return pad2(p.m) + "-" + pad2(p.d) + "(周" + DOW[p.dow] + ")" + hhmm;
+}
+
+// 倒计时：相对"现在"的精确时长，所以和时区无关
+function fmtRemain(iso, now){
+  const ms = Date.parse(iso) - now;
+  const past = ms < 0;
+  const mins = Math.floor(Math.abs(ms) / 60000);
+  const days = Math.floor(mins / 1440);
+  const hours = Math.floor((mins % 1440) / 60);
+  let body;
+  if (days >= 100)      body = "很久";
+  else if (days >= 1)   body = days + "天" + hours + "小时";
+  else if (hours >= 1)  body = hours + "小时" + (mins % 60) + "分钟";
+  else                  body = Math.max(mins, 0) + "分钟";
+  return past ? "逾期 " + body : "还剩 " + body;
+}
+
+// 倒计时状态：over 已逾期 / soon 将到期（阈值见 CSS 变量 --soon-days）/ normal
+function dueState(iso, now){
+  const ms = Date.parse(iso) - now;
+  const soonMs = 3 * 86400e3;   // ← 想改"几天算将到期"，改这里的 3
+  if (ms < 0) return "over";
+  if (ms <= soonMs) return "soon";
+  return "normal";
+}
+
+// 把 "2026-10-25" + 可选的 "23:59" 变成带 UTC+8 偏移的 ISO 时刻
+function dueToISO(dateText, timeText){
+  if (!dateText) return null;
+  const d = dateText.split("-").map(Number);
+  const [hh, mm] = timeText ? timeText.split(":").map(Number) : [23, 59];
+  return new Date(Date.UTC(d[0], d[1] - 1, d[2], hh, mm, 0) - TZ_OFFSET_HOURS * 3600e3).toISOString();
+}
+
+// 反过来：ISO → 日期输入框和时间输入框里该显示的文字
+function isoToDateInput(iso){
+  const p = tzParts(iso);
+  return { date: p.y + "-" + pad2(p.m) + "-" + pad2(p.d),
+           time: pad2(p.hh) + ":" + pad2(p.mm) };
+}
+
+// 日期控件当前选中的值 → 显示文字。注意 "2026-10-25" 这种纯日期字符串
+// 一定要按 UTC 解析：直接 new Date("2026-10-25") 得到的也是 UTC 零点，
+// 但若哪天改成带时间的字符串，按本地解析就会整体偏一天。
+function formatDDL(dateText, timeText){
+  const t = Date.parse(dateText + "T00:00:00Z") + TZ_OFFSET_HOURS * 3600e3;
+  const p = tzParts(t);
+  return p.m + "月" + p.d + "日 周" + DOW[p.dow] + (timeText ? " " + timeText : "");
+}
+
+// 刷新 DDL 按钮的外观。按钮结构固定为：
+//   <span class="cal">（日历 SVG）</span>
+//   <span class="txt"><span class="ph">设置 DDL</span><span class="val"></span></span>
+//   <span class="clr">✕</span>
+// 没选日期时显示 .ph，选了就换成 .val 里的日期文字。
+function updateDP(scope){
+  const { date, time, btn, clear } = scope;
+  const dd = date.value, tt = time.value;
+  btn.classList.toggle("set", !!dd);
+  btn.querySelector(".ph").hidden  = !!dd;
+  btn.querySelector(".val").hidden = !dd;
+  btn.querySelector(".val").textContent = dd ? formatDDL(dd, tt) : "";
+  if (clear) clear.hidden = !dd;
+}
+
+// 把一个 DDL 控件接上事件。主表单和编辑表单共用这套逻辑，只是元素不同。
+function wireDatePicker(scope){
+  const onChange = () => updateDP(scope);
+  scope.date.addEventListener("input",  onChange);
+  scope.date.addEventListener("change", onChange);
+  scope.time.addEventListener("input",  onChange);
+  scope.time.addEventListener("change", onChange);
+
+  if (scope.clear) scope.clear.onclick = (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    scope.date.value = "";
+    scope.time.value = "";
+    updateDP(scope);
+  };
+
+  // 兜底：万一某个浏览器不把点击转发给那个透明输入框，这里显式调起日历。
+  // 覆盖整片区域，所以"点文字没反应"这种情况不会再有。
+  if (scope.wrap) scope.wrap.addEventListener("click", (ev) => {
+    if (scope.clear && (ev.target === scope.clear || scope.clear.contains(ev.target))) return;
+    try { scope.date.showPicker(); } catch (e) { /* 浏览器不支持或不允许，忽略 */ }
+  });
+
+  updateDP(scope);
+}
+
+// 新增表单里那个 DDL 控件（元素固定，取一次即可）
+const MAIN_DP = {
+  wrap:  document.querySelector("#dueWrap .datepicker"),
+  date:  $("addDue"),
+  time:  $("addTime"),
+  btn:   $("dueBtn"),
+  clear: $("dueClear"),
+};
+
+let toastTimer = null;
+function toast(msg, ms){
+  document.querySelectorAll(".toast").forEach((n) => n.remove());
+  const n = document.createElement("div");
+  n.className = "toast";
+  n.textContent = msg;
+  document.body.appendChild(n);
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => n.remove(), ms || 2600);
+}
+
+/* ------------------------------------------------------------
+   §4.3  设置与缓存（localStorage）
+   ------------------------------------------------------------ */
+
+function loadJSON(key, fallback){
+  try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; }
+  catch (e) { return fallback; }
+}
+function saveJSON(key, value){
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) {}
+}
+
+// 开发用离线模式：不连数据库，数据只在本地。
+// 想临时试一下，在浏览器控制台执行：localStorage.setItem("qs.offline","true")
+// 恢复：localStorage.removeItem("qs.offline")
+function isOffline(){ return loadJSON(K_OFFLINE, false) === true; }
+
+/* ------------------------------------------------------------
+   §4.4  与 Supabase 的连接
+   ------------------------------------------------------------ */
+
+let sb = null;          // Supabase 客户端
+let currentUser = null; // 当前登录的用户（用来填 user_id）
+let channel = null;     // 实时订阅的频道
+
+function getCfg(){ return { url: SUPABASE_URL, key: SUPABASE_ANON_KEY }; }
+
+function initSupabase(){
+  const cfg = getCfg();
+  if (typeof supabase === "undefined")
+    return { ok:false, reason:"CDN 没加载上（页面可能没联网），刷新试试" };
+  if (!cfg.url || !cfg.key)
+    return { ok:false, reason:"没配置 Supabase 地址和 key" };
+  try {
+    sb = supabase.createClient(cfg.url, cfg.key);   // 客户端会自动持久化并刷新会话
+    return { ok:true };
+  } catch (e) {
+    return { ok:false, reason:"初始化失败：" + (e.message || e) };
+  }
+}
+
+// 登录：用邮箱密码换会话。会话之后由 SDK 存在浏览器里并自动续期。
+async function signIn(email, pass){
+  const { data, error } = await sb.auth.signInWithPassword({ email, password: pass });
+  if (error) throw error;
+  currentUser = data.user;
+  return data.user;
+}
+
+function setStatus(kind, text){
+  const dot = $("statusDot");
+  dot.className = "dot " + (kind || "");
+  $("statusText").textContent = text;
+}
+
+async function signOut(){
+  try { await sb.auth.signOut(); } catch (e) {}
+  currentUser = null;
+  saveJSON(K_CACHE, []);
+  location.reload();
+}
+
+/* ------------------------------------------------------------
+   §4.5  数据层：本地是唯一真相，网络只是"搬运"
+   ------------------------------------------------------------
+   一条本地记录的字段（就是你要求的 JSON）：
+     id         唯一标识（客户端生成）
+     category   "A" | "B" | "C"
+     title      任务名
+     note       任务备注
+     due_at     DDL，ISO 字符串；null 表示无期限（只有 A 类会用到）
+     done       完成状态
+     pinned     B 类置顶
+     created_at 创建日期
+     updated_at 最后修改时间（由数据库触发器维护）
+   以下划线开头的字段是本地的"记账"，不上传给服务器：
+     _synced    false 表示这条改动还没写进数据库
+     _dirty     true 表示本地比服务器新
+   ------------------------------------------------------------ */
+
+let tasks = [];
+let deletedIds = [];   // 墓碑：本地已删、服务器还不知道的 id
+// 哪些任务的备注被展开了。只存在内存里：刷新页面回到"默认折叠"更符合预期，
+// 也省得给一条设置写同步逻辑。
+let expandedNotes = new Set();
+
+// 为什么要墓碑：删除这个动作没法"重试"——你把行从本地抹掉之后，
+// 如果那一次网络请求失败了，本地就再也没有任何线索知道"这一行还没删掉"，
+// 下次打开它会从服务器重新出现。所以删除必须留下记号。
+function recordDeletion(id){
+  deletedIds.push({ id, at: Date.now() });
+  if (deletedIds.length > 500) deletedIds = deletedIds.slice(-500);
+  saveJSON(K_DEL, deletedIds);
+}
+
+function loadCache(){
+  tasks = loadJSON(K_CACHE, []).map(seed);
+  tasks.forEach((t) => { t._synced = true; t._dirty = false; });
+  deletedIds = loadJSON(K_DEL, []);
+}
+function seed(row){
+  return Object.assign({ note:"", due_at:null, done:false, pinned:false }, row);
+}
+function saveCache(){
+  saveJSON(K_CACHE, tasks.map((t) => ({
+    id:t.id, category:t.category, title:t.title, note:t.note,
+    due_at:t.due_at, done:t.done, pinned:t.pinned,
+    created_at:t.created_at, updated_at:t.updated_at,
+  })));
+}
+const byId = (id) => tasks.find((t) => t.id === id);
+
+// 全量拉取。个人清单规模很小（几百条量级），一次拉完最简单也最不容易出错。
+async function pullAll(){
+  if (isOffline() || !sb) return { ok:false };
+  const { data, error } = await sb.from(TABLE).select("*").order("created_at", { ascending: false });
+  if (error) return { ok:false, reason:error.message };
+
+  // 服务器有、本地没有 → 收下
+  (data || []).forEach((r) => {
+    const local = byId(r.id);
+    if (!local) {
+      // 但如果是我们自己刚删掉、服务器还没处理的，就不要再收回来了
+      if (deletedIds.some((d) => d.id === r.id)) return;
+      tasks.push(seed(r));
+      return;
+    }
+    // 本地刚改过、还没上传的行，不许被服务器的旧版本覆盖
+    if (local._dirty || !local._synced) return;
+    Object.assign(local, r);
+  });
+
+  // 本地有、服务器没有 → 只可能是"还没上传过的新行"（保留），
+  // 或者"曾经上传过但现在服务器上没了"（别处删的，跟着删）。
+  const remoteIds = new Set((data || []).map((r) => r.id));
+  tasks = tasks.filter((t) => remoteIds.has(t.id) || !t._synced);
+
+  saveCache();
+  return { ok:true, count:remoteIds.size };
+}
+
+// 把本地未同步/被改动的行写回服务器，顺带补做没做完的删除
+async function pushDirty(){
+  if (isOffline() || !sb || !currentUser) return { ok:false };
+  const dirty = tasks.filter((t) => !t._synced || t._dirty);
+
+  // 先补删除：这类操作不需要用户再点一次，重试是安全的
+  if (deletedIds.length) {
+    const ids = deletedIds.map((d) => d.id);
+    const { error } = await sb.from(TABLE).delete().in("id", ids);
+    if (error) return { ok:false, reason:error.message };
+    deletedIds = deletedIds.filter((d) => ids.indexOf(d.id) < 0);
+    saveJSON(K_DEL, deletedIds);
+  }
+
+  if (!dirty.length) return { ok:true, count:0 };
+
+  const rows = dirty.map((t) => ({
+    id: t.id,
+    user_id: currentUser.id,
+    category: t.category,
+    title: t.title,
+    note: t.note || "",
+    due_at: t.due_at,
+    done: !!t.done,
+    pinned: !!t.pinned,
+    created_at: t.created_at,
+  }));
+
+  const { error } = await sb.from(TABLE).upsert(rows, { onConflict: "id" });
+  if (error) return { ok:false, reason:error.message };
+
+  dirty.forEach((t) => { t._synced = true; t._dirty = false; });
+  saveCache();
+  return { ok:true, count:rows.length };
+}
+
+// 一次完整的往返：先上传本地改动，再拉取别人的改动
+let syncing = false;
+async function fullSync(opts){
+  if (isOffline()) { setStatus("warn", "离线模式：数据只存在这台设备上"); return; }
+  if (!sb)         { setStatus("err", "未连接：请检查 Supabase 配置"); return; }
+  if (!currentUser){ setStatus("err", "未登录"); return; }
+  if (syncing) return;
+  syncing = true;
+  setStatus("warn", "同步中…");
+
+  try {
+    const up = await pushDirty();
+    if (!up.ok) throw new Error(up.reason || "上传失败");
+    const down = await pullAll();
+    if (!down.ok) throw new Error(down.reason || "拉取失败");
+    setStatus("ok", "已同步 · " + (down.count || 0) + " 条");
+    render();
+  } catch (e) {
+    setStatus("err", "同步失败：" + (e.message || e));
+  } finally {
+    syncing = false;
+  }
+}
+
+/* ------------------------------------------------------------
+   §4.6  写操作：先改本地并立刻重绘，网络在后台追
+   ------------------------------------------------------------ */
+
+function addTask(data){
+  const t = {
+    id: uuid(),
+    category: data.category,
+    title: data.title.trim(),
+    note: (data.note || "").trim(),
+    due_at: data.due_at || null,
+    done: false,
+    pinned: false,
+    created_at: new Date().toISOString(),
+    _synced: false,
+    _dirty: true,
+  };
+  tasks.unshift(t);
+  saveCache();
+  render();
+  fullSync();
+  return t;
+}
+
+function toggleDone(id){
+  const t = byId(id); if (!t) return;
+  t.done = !t.done;
+  t._dirty = true;
+  saveCache();
+  render();
+  fullSync();
+}
+
+function togglePinned(id){
+  const t = byId(id); if (!t) return;
+  t.pinned = !t.pinned;
+  t._dirty = true;
+  saveCache();
+  render();
+  fullSync();
+}
+
+function updateTask(id, patch){
+  const t = byId(id); if (!t) return;
+  Object.assign(t, patch);
+  t._dirty = true;
+  saveCache();
+  render();
+  fullSync();
+}
+
+async function removeTask(id){
+  const t = byId(id); if (!t) return;
+  if (!confirm("删除「" + t.title + "」？")) return;
+
+  // 先改本地并重绘，用户的感受是"立刻删掉了"
+  tasks = tasks.filter((x) => x.id !== id);
+  recordDeletion(id);     // 留下墓碑，保证网络失败时下次还能补删
+  saveCache();
+  render();
+
+  // 网络这步成功与否都不影响本地已经删掉的事实
+  const r = await pushDirty();
+  if (!r.ok) toast("已在本机删除，联网后会自动同步");
+  else       toast("已删除");
+}
+
+/* ------------------------------------------------------------
+   §4.7  实时推送：别的设备一改，这边立刻跟上
+   ------------------------------------------------------------ */
+function ensureRealtime(){
+  if (!sb || channel) return;
+  try {
+    channel = sb.channel("tasks-live")
+      .on("postgres_changes",
+          { event: "*", schema: "public", table: TABLE },
+          () => { clearTimeout(ensureRealtime._t);
+                  ensureRealtime._t = setTimeout(() => fullSync({ quiet:true }), 400); })
+      .subscribe();
+  } catch (e) { /* 免费额度里 Realtime 不可用，忽略即可 */ }
+}
+
+/* ------------------------------------------------------------
+   §4.8  界面
+   ------------------------------------------------------------ */
+
+const CATS = [
+  { id:"A", label:"A 待办作业" },
+  { id:"B", label:"B 待实现 idea" },
+  { id:"C", label:"C 学习规划" },
+];
+const CAT_LABEL = { A:"A 待办作业", B:"B 待实现 idea", C:"C 学习规划" };
+
+let currentCat = loadJSON("qs.cat", "A");
+if (!CAT_LABEL[currentCat]) currentCat = "A";
+
+function tasksOf(cat){ return tasks.filter((t) => t.category === cat); }
+
+// 排序意图：没做完的排前面；没做完的按 DDL 由近到远，无 DDL 的垫底；
+// 做完了的按创建时间倒序（最近完成的最上面）。
+function sortTasks(arr){
+  return arr.slice().sort((a, b) => {
+    if (a.done !== b.done) return a.done ? 1 : -1;
+    if (a.done) return Date.parse(b.created_at) - Date.parse(a.created_at);
+    if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
+    const ad = a.due_at ? Date.parse(a.due_at) : Infinity;
+    const bd = b.due_at ? Date.parse(b.due_at) : Infinity;
+    if (ad !== bd) return ad - bd;
+    return Date.parse(b.created_at) - Date.parse(a.created_at);
+  });
+}
+
+function renderTabs(){
+  const box = $("tabs");
+  box.innerHTML = "";
+  CATS.forEach((c) => {
+    const n = tasksOf(c.id).filter((t) => !t.done).length;
+    const b = document.createElement("button");
+    b.className = "tab" + (c.id === currentCat ? " active" : "");
+    b.innerHTML = esc(c.label) + '<span class="cnt">' + n + "</span>";
+    b.onclick = () => {
+      currentCat = c.id;
+      saveJSON("qs.cat", c.id);
+      $("addTitle").placeholder = "添加到 " + CAT_LABEL[c.id] + "…";
+      render();
+    };    box.appendChild(b);
+  });
+  $("addTitle").placeholder = "添加到 " + CAT_LABEL[currentCat] + "…";
+}
+
+function card(t, now){
+  const el = document.createElement("div");
+  el.className = "card" + (t.done ? " done" : "");
+
+  // 勾选框
+  const box = document.createElement("button");
+  box.className = "box";
+  box.textContent = "✓";
+  box.title = t.done ? "标记为未完成" : "标记为完成";
+  box.onclick = () => toggleDone(t.id);
+  el.appendChild(box);
+
+  const main = document.createElement("div");
+  main.className = "main";
+
+  const title = document.createElement("div");
+  title.className = "title";
+  title.textContent = t.title;
+  main.appendChild(title);
+
+  if (t.note) {
+    const long = t.note.length > NOTE_CLAMP_CHARS;
+    const open = expandedNotes.has(t.id);
+    const note = document.createElement("div");
+    // 只在"长且收起"时加 clamp 类，避免短备注被莫名其妙截断
+    note.className = "note" + (long && !open ? " clamp" : "");
+    note.textContent = t.note;
+    main.appendChild(note);
+
+    if (long) {
+      if (!open) note.title = t.note;   // 收起时鼠标悬停可看全文（手机上无效，所以仍需要展开按钮）
+      const btn = document.createElement("button");
+      btn.className = "note-more";
+      btn.textContent = open ? "收起" : "展开全文（共 " + t.note.length + " 字）";
+      btn.onclick = () => {
+        if (open) expandedNotes.delete(t.id);
+        else      expandedNotes.add(t.id);
+        render();
+      };
+      main.appendChild(btn);
+    }
+  }
+
+  const meta = document.createElement("div");
+  meta.className = "meta";
+
+  // 时间相关的信息，只在没做完时强调；做完的就不用再催了
+  if (t.due_at) {
+    const c = document.createElement("span");
+    const st = t.done ? "normal" : dueState(t.due_at, now);
+    c.className = "chip " + (t.done ? "none" : st);
+    c.textContent = (st === "over" && !t.done ? "⚠ " : "") + fmtDue(t.due_at) +
+                    (t.done ? "" : " · " + fmtRemain(t.due_at, now));
+    meta.appendChild(c);
+  } else if (t.category === "A") {
+    const c = document.createElement("span");
+    c.className = "chip none";
+    c.textContent = "无期限";
+    meta.appendChild(c);
+  }
+
+  if (t.pinned) {
+    const c = document.createElement("span");
+    c.className = "chip pin";
+    c.textContent = "置顶";
+    meta.appendChild(c);
+  }
+
+  main.appendChild(meta);
+  el.appendChild(main);
+
+  // 操作区
+  const acts = document.createElement("div");
+  acts.className = "acts";
+
+  const bEdit = document.createElement("button");
+  bEdit.className = "btn tiny";
+  bEdit.textContent = "编辑";
+  bEdit.onclick = () => openEditor(t, el);
+  acts.appendChild(bEdit);
+
+  if (t.category === "B") {
+    const bPin = document.createElement("button");
+    bPin.className = "btn tiny";
+    bPin.textContent = t.pinned ? "取消置顶" : "置顶";
+    bPin.onclick = () => togglePinned(t.id);
+    acts.appendChild(bPin);
+  }
+
+  const bDel = document.createElement("button");
+  bDel.className = "btn tiny danger";
+  bDel.textContent = "删除";
+  bDel.onclick = () => removeTask(t.id);
+  acts.appendChild(bDel);
+
+  el.appendChild(acts);
+  return el;
+}
+
+function openEditor(t, cardEl){
+  // 就地展开一个编辑表单，比弹窗在手机上更好操作
+  const ed = document.createElement("div");
+  ed.className = "main";
+  ed.style.marginTop = "8px";
+  ed.innerHTML =
+    '<input class="inp et" maxlength="300">' +
+    '<textarea class="inp en" rows="2" maxlength="2000" style="margin-top:6px"></textarea>' +
+    (t.category === "A"
+      ? '<div class="due-row">' +
+          '<div class="datepicker">' +
+            '<button class="dpbtn" type="button">' +
+            '<span class="cal"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 11h18"/></svg></span>' +
+              '<span class="txt"><span class="ph">设置 DDL</span><span class="val" hidden></span></span>' +
+              '<span class="clr" title="清除 DDL" hidden>✕</span>' +
+            '</button>' +
+            '<input type="date" aria-label="选择截止日期">' +
+          '</div>' +
+          '<input class="inp eh" type="time">' +
+        '</div>'
+      : "") +
+    '<div class="row"><button class="btn primary es">保存</button>' +
+    '<button class="btn ec">取消</button></div>';
+  ed.querySelector(".et").value = t.title;
+  ed.querySelector(".en").value = t.note || "";
+
+  let edDP = null;
+  if (t.category === "A") {
+    edDP = {
+      wrap:  ed.querySelector(".datepicker"),
+      date:  ed.querySelector('input[type="date"]'),
+      time:  ed.querySelector(".eh"),
+      btn:   ed.querySelector(".dpbtn"),
+      clear: ed.querySelector(".clr"),
+    };
+    if (t.due_at) {
+      const v = isoToDateInput(t.due_at);
+      edDP.date.value = v.date;
+      edDP.time.value = v.time;
+    }
+    wireDatePicker(edDP);   // 自动把按钮文字刷成已选中的日期
+  }
+
+  ed.querySelector(".ec").onclick = () => render();
+  ed.querySelector(".es").onclick = () => {
+    const title = ed.querySelector(".et").value.trim();
+    if (!title) { toast("任务名不能为空"); return; }
+    const patch = { title, note: ed.querySelector(".en").value.trim() };
+    if (t.category === "A") {
+      patch.due_at = dueToISO(edDP.date.value, edDP.time.value);
+    }
+    updateTask(t.id, patch);
+  };
+
+  cardEl.querySelector(".main").replaceWith(ed);
+}
+
+function render(){
+  if (!sb && !isOffline()) { /* 还没配上，也照样把界面画出来 */ }
+  const now = Date.now();
+
+  // 当天日期 + 星期，给你一点时间锚点
+  const p = tzParts(now);
+  $("todayLabel").textContent = pad2(p.m) + "月" + pad2(p.d) + "日 周" + DOW[p.dow];
+
+  $("tabs").style.display = isOffline() ? "none" : "flex";
+  $("dueWrap").style.display = currentCat === "A" ? "" : "none";
+  $("dueHint").style.display = currentCat === "A" ? "" : "none";
+  // 切换标签页后按钮上的日期文字要保持正确（可能是上次留下的未提交值）
+  updateDP(MAIN_DP);
+  renderTabs();
+
+  const wrap = $("listWrap");
+  wrap.innerHTML = "";
+
+  const all  = sortTasks(tasksOf(currentCat));
+  const open = all.filter((t) => !t.done);
+  const fin  = all.filter((t) => t.done);
+
+  if (!all.length) {
+    const e = document.createElement("div");
+    e.className = "empty";
+    e.textContent = "这里还是空的。在上面输入框里写第一条吧。";
+    wrap.appendChild(e);
+    return;
+  }
+
+  const g1 = document.createElement("div");
+  g1.className = "group";
+  g1.textContent = "进行中 · " + open.length;
+  wrap.appendChild(g1);
+  const l1 = document.createElement("div");
+  l1.className = "list";
+  open.forEach((t) => l1.appendChild(card(t, now)));
+  if (!open.length) l1.innerHTML = '<div class="empty">都做完了。</div>';
+  wrap.appendChild(l1);
+
+  if (fin.length) {
+    const g2 = document.createElement("div");
+    g2.className = "group";
+    g2.textContent = "已完成 · " + fin.length;
+    wrap.appendChild(g2);
+    const l2 = document.createElement("div");
+    l2.className = "list";
+    fin.forEach((t) => l2.appendChild(card(t, now)));
+    wrap.appendChild(l2);
+
+    const bar = document.createElement("div");
+    bar.className = "bar";
+    const b = document.createElement("button");
+    b.className = "btn tiny danger";
+    b.textContent = "清空本类已完成";
+    b.onclick = async () => {
+      if (!confirm("删除 " + CAT_LABEL[currentCat] + " 里全部 " + fin.length + " 条已完成？")) return;
+      const ids = fin.map((t) => t.id);
+      tasks = tasks.filter((t) => ids.indexOf(t.id) < 0);
+      ids.forEach(recordDeletion);
+      saveCache(); render();
+      const r = await pushDirty();
+      toast(r.ok ? "已清理 " + ids.length + " 条" : "已在本机清理，联网后自动同步");
+    };
+    bar.appendChild(b);
+    wrap.appendChild(bar);
+  }
+}
+
+/* ------------------------------------------------------------
+   §4.9  启动流程
+   ------------------------------------------------------------ */
+function showAuth(msg){
+  $("authScreen").hidden = false;
+  $("appScreen").hidden = true;
+  if (msg) $("authMsg").textContent = msg;
+}
+
+function showApp(){
+  $("authScreen").hidden = true;
+  $("appScreen").hidden = false;
+  render();
+}
+
+async function boot(){
+  if (isOffline()) {           // 离线模式：跳过登录，纯本地
+    loadCache();
+    showApp();
+    setStatus("warn", "离线模式：数据只存在这台设备上");
+    return;
+  }
+
+  const init = initSupabase();
+  if (!init.ok) { showAuth(init.reason + "。请先按 README 完成配置。"); return; }
+
+  // 绑定登录按钮
+  $("btnSignIn").onclick = async () => {
+    const email = $("authEmail").value.trim();
+    const pass  = $("authPass").value;
+    if (!email || !pass) { $("authMsg").textContent = "邮箱和密码都要填。"; return; }
+    $("authMsg").textContent = "登录中…";
+    try {
+      await signIn(email, pass);
+      await afterLogin();
+    } catch (e) {
+      $("authMsg").textContent = "登录失败：" + (e.message || e);
+    }
+  };
+
+  // 取回上次的会话（SDK 会自动续期）
+  try {
+    const { data } = await sb.auth.getSession();
+    if (data && data.session && data.session.user) {
+      currentUser = data.session.user;
+      await afterLogin();
+      return;
+    }
+  } catch (e) {}
+
+  showAuth("");
+}
+
+async function afterLogin(){
+  loadCache();
+  showApp();
+  setStatus("warn", "同步中…");
+  await fullSync();
+  ensureRealtime();
+}
+
+// 退出登录
+if ($("btnSignOut")) $("btnSignOut").onclick = signOut;
+// 手动同步
+if ($("btnSync")) $("btnSync").onclick = () => fullSync();
+// DDL 控件：与是否登录无关，页面一加载就绑好
+wireDatePicker(MAIN_DP);
+
+// 新增任务成功后把输入区还原成"空白"状态（按钮上那个"设置 DDL"也要回来）
+function resetAddForm(){
+  $("addTitle").value = "";
+  $("addNote").value = "";
+  MAIN_DP.date.value = "";
+  MAIN_DP.time.value = "";
+  updateDP(MAIN_DP);
+}
+
+// 新增任务
+$("addForm").addEventListener("submit", (ev) => {
+  ev.preventDefault();
+  const title = $("addTitle").value.trim();
+  if (!title) { toast("先写点内容吧"); return; }
+  addTask({
+    category: currentCat,
+    title,
+    note: $("addNote").value,
+    due_at: currentCat === "A" ? dueToISO($("addDue").value, $("addTime").value) : null,
+  });
+  resetAddForm();
+  $("addTitle").focus();
+});
+
+// 倒计时会随时间变化，每分钟重画一次
+setInterval(() => { if (!$("appScreen").hidden) render(); }, 60000);
+
+// 页面被藏起来再打开时（手机切后台最常见）顺手同步一次
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && currentUser) fullSync({ quiet:true });
+});
+
+// 添加任务后立刻同步，所以不需要额外轮询；这里加一条兜底，防止某次网络抖动漏掉
+setInterval(() => {
+  if (currentUser && (deletedIds.length || tasks.some((t) => !t._synced || t._dirty)))
+    fullSync({ quiet:true });
+}, 30000);
+
+// 关页面前尽量把改动发出去
+window.addEventListener("beforeunload", () => { if (!isOffline()) pushDirty(); });
+
+boot();
+</script>
+</body>
+</html>
