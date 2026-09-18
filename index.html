@@ -361,6 +361,21 @@ function dueState(iso, now){
   return "normal";
 }
 
+// "今天 / 明天 / 后天"，其他情况返回空字符串。
+// 注意必须按"日历天"来算，不能按毫秒差除以 24 小时——
+// 现在是 23:00，DDL 是明天 08:00，两者只差 9 小时，但按日历是"明天"；
+// 反过来现在是 01:00，DDL 是今天 23:00，差 22 小时，却是"今天"。
+// 所以这里只在固定时区（UTC+8）里比较"年-月-日"三个数字。
+function dayLabel(iso, now){
+  const a = tzParts(now);
+  const b = tzParts(iso);
+  const diff = (Date.UTC(b.y, b.m - 1, b.d) - Date.UTC(a.y, a.m - 1, a.d)) / 86400e3;
+  if (diff === 0) return "今天";
+  if (diff === 1) return "明天";
+  if (diff === 2) return "后天";
+  return "";
+}
+
 // 把 "2026-10-25" + 可选的 "23:59" 变成带 UTC+8 偏移的 ISO 时刻
 function dueToISO(dateText, timeText){
   if (!dateText) return null;
@@ -827,9 +842,12 @@ function card(t, now){
   if (t.due_at) {
     const c = document.createElement("span");
     const st = t.done ? "normal" : dueState(t.due_at, now);
+    // "今天 / 明天 / 后天"直接接在"还剩…"后面，用 · 连接，不另起标签
+    const when = t.done ? "" : dayLabel(t.due_at, now);
     c.className = "chip " + (t.done ? "none" : st);
     c.textContent = (st === "over" && !t.done ? "⚠ " : "") + fmtDue(t.due_at) +
-                    (t.done ? "" : " · " + fmtRemain(t.due_at, now));
+                    (t.done ? "" : " · " + fmtRemain(t.due_at, now)) +
+                    (when ? " · " + when : "");
     meta.appendChild(c);
   } else if (t.category === "A") {
     const c = document.createElement("span");
