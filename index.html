@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0e1116">
-<title>清单</title>
+<title>CheVuoi</title>
 <style>
 /* ==========================================================
    §1  外观。想改配色，只改这一段里的变量就够了，
@@ -103,6 +103,7 @@ input[type=date],input[type=time]{min-width:0}
 .btn:active{transform:translateY(1px)}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:#0b1020;font-weight:600}
 .btn.tiny{padding:5px 9px;font-size:13px;border-radius:8px}
+.btn.off{opacity:.55}
 .btn.danger{color:var(--danger);border-color:#3a2320}
 
 /* ---------- 顶部状态条 ---------- */
@@ -183,6 +184,30 @@ input[type=time]::-webkit-calendar-picker-indicator:hover{opacity:.9}
 .empty{color:var(--fg-dim);text-align:center;padding:34px 10px;font-size:13.5px}
 .bar{display:flex;justify-content:flex-end;margin-top:12px}
 
+/* ---------- 完成任务的动效 ----------
+   纯 CSS 实现，用 JS 加一个类名触发，动画播完由 animationend 事件移除类名。
+   没有引入任何动画库。 */
+@keyframes donePop{
+  0%   {transform:scale(1)}
+  40%  {transform:scale(1.45)}
+  100% {transform:scale(1)}
+}
+@keyframes doneSettle{
+  0%   {transform:scale(1)   translateY(-3px); opacity:.35}
+  60%  {transform:scale(1.015) translateY(0);  opacity:1}
+  100% {transform:scale(1)   translateY(0)}
+}
+@keyframes doneFlash{
+  0%   {box-shadow:0 0 0 0 rgba(62,207,142,.55)}
+  100% {box-shadow:0 0 0 14px rgba(62,207,142,0)}
+}
+.card.just-done .box{animation:donePop .42s cubic-bezier(.34,1.56,.64,1)}
+.card.just-done{animation:doneSettle .42s ease, doneFlash .55s ease}
+/* 尊重系统的"减少动态效果"设置：关掉动效，功能不受影响 */
+@media (prefers-reduced-motion: reduce){
+  .card.just-done,.card.just-done .box{animation:none}
+}
+
 .toast{
   position:fixed;left:50%;bottom:24px;transform:translateX(-50%);
   background:#242b36;border:1px solid var(--line);color:var(--fg);
@@ -199,7 +224,7 @@ kbd{background:#222a35;border:1px solid var(--line);border-radius:5px;padding:1p
      §2  登录界面：只有在浏览器里还没存过会话时才出现
      ============================================================ -->
 <div id="authScreen" class="screen" hidden>
-  <h1>清单<small>第一论域</small></h1>
+  <h1>CheVuoi<small>第一论域</small></h1>
   <p class="sub">首次使用：填一次你为这个工具建的 Supabase 账号，之后浏览器会记住。</p>
 
   <div class="grid2">
@@ -220,11 +245,12 @@ kbd{background:#222a35;border:1px solid var(--line);border-radius:5px;padding:1p
      §3  主界面
      ============================================================ -->
 <div id="appScreen" class="screen" hidden>
-  <h1>清单<small id="todayLabel"></small></h1>
+  <h1>CheVuoi<small id="todayLabel"></small></h1>
 
   <div class="status">
     <span id="statusDot" class="dot"></span>
     <span id="statusText">正在连接…</span>
+    <button id="btnSound" class="btn tiny">音效 开</button>
     <button id="btnSync" class="btn tiny">立即同步</button>
     <button id="btnSignOut" class="btn tiny">退出</button>
   </div>
@@ -286,6 +312,9 @@ const TZ_OFFSET_HOURS = 8;
 
 // 数据库表名，与 supabase.sql 里保持一致
 const TABLE = "tasks";
+
+// 完成任务时是否播放提示音（可在界面上用"音效"按钮切换，选择会记住）
+const K_SOUND = "qs.sound";
 
 // 备注超过多少个字就折叠（大约 3 行）。嫌太早/太晚折叠就改这个数。
 const NOTE_CLAMP_CHARS = 60;
@@ -462,6 +491,156 @@ function toast(msg, ms){
 }
 
 /* ------------------------------------------------------------
+   §4.4  音效
+   ------------------------------------------------------------
+   没有引入任何音频文件，全靠 Web Audio 现场"合成"。
+   为什么这样做：
+     1. 整个工具只有 index.html 一个文件，塞一个 mp3 进来会破坏这个前提；
+     2. 合成出来的声音可控——所有参数都集中在下面这一块，想换质感改数字即可；
+     3. 体积为零，不用等下载。
+   ------------------------------------------------------------ */
+
+/* ---- 撕纸声的全部可调参数（改这里就行）---- */
+const TEAR = {
+  dur:       0.46,     // 总时长（秒）。拉长＝更解压；缩短＝更干脆
+  bpStart:    900,     // 带通中心频率起点
+  bpEnd:     1300,     // 带通中心频率终点（撕开时音色略微变亮）
+  bpQ:        0.55,    // 带通 Q 值。调高会变"细"甚至出现音高感，纸感会丢
+  lpCut:     3200,     // 低通截止，削掉最刺耳的高频
+  peak:       0.24,    // 音量峰值
+  grains:     420,     // 噪声里随机颗粒的数量（纤维感）。它必须跟 dur 一起涨：
+                       // 时间拉长会摊薄密度，不补颗粒就会从"撕纸"变成"沙沙的风声"
+  baseNoise:  0.15,    // 颗粒之外的底层细噪声（让它有连续感，不是一颗颗脆响）
+  flutter:   [[11, 0.14], [17, 0.10], [23, 0.07]],   // 粗糙度：[频率, 深度]
+};
+
+// 所有音效共用同一个音频上下文。没有就建一个，被浏览器挂起就唤醒它。
+// 浏览器要求"首次播放必须由用户操作触发"，而打勾正好是用户操作，所以能通过。
+function ensureAudio(){
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === "suspended") audioCtx.resume();
+  return audioCtx;
+}
+
+// 造一段噪声。这是撕纸声的原料——纤维断裂本质上就是一堆极短、极随机的冲击。
+//
+// 关键在于对"不规则"的理解。有两种造假方式，差别很大：
+//   ✗ 把音量做周期性抖动 —— 即使频率再快、再叠几层，听感上仍是"哒哒哒"的规律脉冲
+//   ✓ 在噪声数据本身里随机撒"颗粒" —— 颗粒的位置、疏密都不规则，才真的像纤维
+// 所以这里不用振荡器去调制音量，而是直接改噪声的采样点：
+//   一大半是"底层细噪声"（连续感），加上数量不多、位置随机的"颗粒"（纤维感）。
+function noiseBuffer(ctx, seconds, grains){
+  const len = Math.max(1, Math.floor(ctx.sampleRate * seconds));
+  const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+  const d = buf.getChannelData(0);
+
+  for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * TEAR.baseNoise;
+
+  // 随机撒颗粒：每颗是一个衰减很快的小丘，宽度和高度都随机
+  for (let g = 0; g < grains; g++) {
+    const at = Math.floor(Math.random() * len);
+    const w  = 3 + Math.floor(Math.random() * 25);      // 颗粒宽度
+    const h  = 0.35 + Math.random() * 0.65;             // 颗粒强度
+    for (let k = 0; k < w && at + k < len; k++) {
+      d[at + k] += (Math.random() * 2 - 1) * h * (1 - k / w);
+    }
+  }
+  return buf;
+}
+
+// 完成任务时播放"撕纸"声
+function tearSound(){
+  if (!soundEnabled()) return;
+  try {
+    const ctx = ensureAudio();
+    const t0 = ctx.currentTime;
+
+    // 原料：带随机颗粒的噪声。
+    // 缓冲区要比 dur 长一截：起音和收尾都落在缓冲区内部，声音才不会戛然而止。
+    const src = ctx.createBufferSource();
+    src.buffer = noiseBuffer(ctx, TEAR.dur + 0.15, TEAR.grains);
+
+    // ---- 带通：决定"什么材质" ----
+    // 中心频率在整体时长的前 70% 里缓慢上移，模拟"撕开—拉长"的过程
+    const bp = ctx.createBiquadFilter();
+    bp.type = "bandpass";
+    bp.frequency.setValueAtTime(TEAR.bpStart, t0);
+    bp.frequency.exponentialRampToValueAtTime(TEAR.bpEnd, t0 + TEAR.dur * 0.7);
+    bp.Q.value = TEAR.bpQ;
+
+    // ---- 低通：削掉最刺耳的高频，不然会像砂纸 ----
+    const lp = ctx.createBiquadFilter();
+    lp.type = "lowpass";
+    lp.frequency.value = TEAR.lpCut;
+
+    // ---- 音量包络：平滑的一起一落 ----
+    // 起音占 22%、收尾占剩下的 78%，这个比例决定了"从容"还是"急促"。
+    // 比例小（比如 10%）会显得急；大了才拖得住，听着才解压。
+    // 全程只有两个斜率，不做台阶——台阶本身就是重音的来源。
+    const env = ctx.createGain();
+    env.gain.setValueAtTime(0.0001, t0);
+    env.gain.exponentialRampToValueAtTime(TEAR.peak, t0 + TEAR.dur * 0.22);
+    env.gain.exponentialRampToValueAtTime(0.0001, t0 + TEAR.dur);
+
+    // ---- 接起来：噪声 → 带通 → 低通 → 音量包络 →（轻微粗糙化）→ 输出 ----
+    const flutter = ctx.createGain();
+    flutter.gain.value = 1.0;
+    TEAR.flutter.forEach(([hz, depth]) => {
+      const lfo = ctx.createOscillator();
+      const lg  = ctx.createGain();
+      lfo.frequency.value = hz;
+      lg.gain.value = depth;      // 深度都很小，只加一点"毛边"，不制造重音
+      lfo.connect(lg);
+      lg.connect(flutter.gain);   // 音频参数可以被音频信号调制，这是 Web Audio 的特色
+      lfo.start(t0);
+      lfo.stop(t0 + TEAR.dur + 0.06);
+    });
+
+    src.connect(bp);
+    bp.connect(lp);
+    lp.connect(env);
+    env.connect(flutter);
+    flutter.connect(ctx.destination);
+
+    src.start(t0);
+    src.stop(t0 + TEAR.dur + 0.06);
+  } catch (e) { /* 浏览器不支持 Web Audio 就算了，静默失败，不影响功能 */ }
+}
+
+let audioCtx = null;
+
+function soundEnabled(){ return loadJSON(K_SOUND, true) === true; }   // 默认开启
+
+// 播一个正弦音：freq 赫兹，when 是"相对现在延迟多久开始"，dur 是时长。
+// 目前没有被调用，留着备用——想切回"叮"就在 toggleDone 里把 tearSound() 换成
+//   beep(659.25, 0, 0.34, 0.16); beep(987.77, 0.085, 0.42, 0.12);
+function beep(freq, when, dur, vol){
+  if (!audioCtx) return;
+  const t0 = audioCtx.currentTime + when;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = "sine";
+  osc.frequency.value = freq;
+  gain.gain.setValueAtTime(0.0001, t0);
+  // 快速起音 + 指数衰减：听起来像"叮"而不是"嘟——"
+  gain.gain.exponentialRampToValueAtTime(vol, t0 + 0.015);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start(t0);
+  osc.stop(t0 + dur + 0.03);
+}
+
+// 切换音效开关，并把当前状态显示在按钮上
+function refreshSoundBtn(){
+  const b = $("btnSound");
+  if (!b) return;
+  const on = soundEnabled();
+  b.textContent = on ? "音效 开" : "音效 关";
+  b.classList.toggle("off", !on);
+}
+
+/* ------------------------------------------------------------
    §4.3  设置与缓存（localStorage）
    ------------------------------------------------------------ */
 
@@ -546,6 +725,13 @@ let deletedIds = [];   // 墓碑：本地已删、服务器还不知道的 id
 // 哪些任务的备注被展开了。只存在内存里：刷新页面回到"默认折叠"更符合预期，
 // 也省得给一条设置写同步逻辑。
 let expandedNotes = new Set();
+// 刚刚被标记完成的任务 id。render() 会给它加一次动效类，然后把这里清空。
+// 用"一次性标记 + 渲染时消费"的方式，而不是给元素永久挂类名——
+// 否则每次重绘（比如每分钟的倒计时刷新）动效都会重播一遍。
+let justDoneId = null;
+// render() 把 justDoneId 搬到这里，card() 从这里读——因为 card() 是 render() 内部调用的，
+// 此时 justDoneId 已经被清空了。
+let animDoneId = null;
 
 // 为什么要墓碑：删除这个动作没法"重试"——你把行从本地抹掉之后，
 // 如果那一次网络请求失败了，本地就再也没有任何线索知道"这一行还没删掉"，
@@ -690,6 +876,13 @@ function toggleDone(id){
   const t = byId(id); if (!t) return;
   t.done = !t.done;
   t._dirty = true;
+
+  // 只有在"刚完成"这一刻才放音效和动效；取消完成则安安静静地走
+  if (t.done) {
+    tearSound();
+    justDoneId = id;                 // 告诉下一次 render()：给这张卡加动效类
+    toast("✓ " + t.title);
+  }
   saveCache();
   render();
   fullSync();
@@ -795,6 +988,14 @@ function renderTabs(){
 function card(t, now){
   const el = document.createElement("div");
   el.className = "card" + (t.done ? " done" : "");
+
+  // 刚完成的那一张：加上动效类，播完就摘掉。
+  // 不是为了"省事"，而是必须摘——否则下一次重绘（倒计时每分钟会重绘一次）
+  // 会重新创建元素，动画又会重播一遍。
+  if (t.id === animDoneId) {
+    el.classList.add("just-done");
+    el.addEventListener("animationend", () => el.classList.remove("just-done"), { once: true });
+  }
 
   // 勾选框
   const box = document.createElement("button");
@@ -955,6 +1156,11 @@ function render(){
   if (!sb && !isOffline()) { /* 还没配上，也照样把界面画出来 */ }
   const now = Date.now();
 
+  // 动效标记是"一次性的"：这次渲染用掉之后立刻清空，
+  // 所以后续的重绘（一分钟一次的倒计时刷新）不会再触发动画。
+  animDoneId = justDoneId;
+  justDoneId = null;
+
   // 当天日期 + 星期，给你一点时间锚点
   const p = tzParts(now);
   $("todayLabel").textContent = pad2(p.m) + "月" + pad2(p.d) + "日 周" + DOW[p.dow];
@@ -1087,6 +1293,15 @@ if ($("btnSignOut")) $("btnSignOut").onclick = signOut;
 if ($("btnSync")) $("btnSync").onclick = () => fullSync();
 // DDL 控件：与是否登录无关，页面一加载就绑好
 wireDatePicker(MAIN_DP);
+
+// 音效开关。注意：打开音效时不播放提示音——
+// 浏览器要求声音必须由用户操作触发，而"点开关"算操作，
+// 但这里响了会和"完成任务才响"混淆，所以特意不响。
+$("btnSound").onclick = () => {
+  saveJSON(K_SOUND, !soundEnabled());
+  refreshSoundBtn();
+};
+refreshSoundBtn();
 
 // 新增任务成功后把输入区还原成"空白"状态（按钮上那个"设置 DDL"也要回来）
 function resetAddForm(){
